@@ -1,0 +1,130 @@
+data_dir: /var/lib/vector
+
+sources:
+  # 1) docker container logs
+  docker_logs:
+    type: docker_logs
+
+  # 2) linux system text logs (rsyslog/syslog style)
+  linux_system_logs:
+    type: file
+    include:
+      - /var/log/messages
+      - /var/log/syslog
+      - /var/log/auth.log
+      - /var/log/kern.log
+    read_from: end
+
+  # 3) nginx access logs
+  nginx_access_logs:
+    type: file
+    include:
+      - /var/log/nginx/access.log
+      - /var/log/nginx/*access*.log
+    read_from: end
+
+  # 4) nginx error logs
+  nginx_error_logs:
+    type: file
+    include:
+      - /var/log/nginx/error.log
+      - /var/log/nginx/*error*.log
+    read_from: end
+
+transforms:
+  normalize_linux_system_logs:
+    type: remap
+    inputs: ["linux_system_logs"]
+    source: |
+      .source_type = "linux_system_logs"
+      if !exists(.host) && exists(.hostname) {
+        .host = .hostname
+      }
+      if !exists(.host) {
+        .host = "unknown"
+      }
+      if !exists(.level) {
+        .level = "info"
+      }
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
+
+  normalize_docker_logs:
+    type: remap
+    inputs: ["docker_logs"]
+    source: |
+      .source_type = "docker_logs"
+      if !exists(.host) && exists(.hostname) {
+        .host = .hostname
+      }
+      if !exists(.host) && exists(.container_name) {
+        .host = .container_name
+      }
+      if !exists(.host) {
+        .host = "unknown"
+      }
+      if !exists(.level) {
+        .level = "info"
+      }
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
+
+  parse_nginx_access:
+    type: remap
+    inputs: ["nginx_access_logs"]
+    source: |
+      .source_type = "nginx_access"
+      parsed, err = parse_nginx_log(.message, "combined")
+      if err == null {
+        . = merge(., parsed)
+      } else {
+        .parse_error = to_string(err)
+      }
+      if !exists(.host) && exists(.hostname) {
+        .host = .hostname
+      }
+      if !exists(.host) {
+        .host = "unknown"
+      }
+      if !exists(.level) {
+        .level = "info"
+      }
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
+
+  parse_nginx_error:
+    type: remap
+    inputs: ["nginx_error_logs"]
+    source: |
+      .source_type = "nginx_error"
+      if !exists(.host) && exists(.hostname) {
+        .host = .hostname
+      }
+      if !exists(.host) {
+        .host = "unknown"
+      }
+      if !exists(.level) {
+        .level = "error"
+      }
+      if !exists(.timestamp) {
+        .timestamp = now()
+      }
+
+sinks:
+  kafka_sink:
+    type: kafka
+    inputs:
+      - normalize_linux_system_logs
+      - normalize_docker_logs
+      - parse_nginx_access
+      - parse_nginx_error
+    bootstrap_servers: "kafka:29092"
+    topic: "linux_raw_logs"
+    encoding:
+      codec: json
+    batch:
+      max_bytes: 1048576
+      timeout_secs: 5

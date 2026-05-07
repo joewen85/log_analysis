@@ -1,0 +1,27 @@
+sources:
+  linux_logs:
+    type: journal_logs
+    match: [{}]
+    read_from: end
+    encoding:
+      codec: json
+transforms:
+  parse_syslog:
+    type: remap
+    inputs: ["linux_logs"]
+    source: |
+      .message = string!(.MESSAGE)
+      .level = .PRIORITY | "6"
+      .host = .HOSTNAME | "unknown"
+      .timestamp = now()
+sinks:
+  kafka_sink:
+    type: kafka
+    inputs: ["parse_syslog"]
+    brokers: ["kafka:29092"]
+    topic: "linux_raw_logs"
+    encoding:
+      codec: json
+    batching:
+      max_bytes: 1000000
+      timeout_secs: 5

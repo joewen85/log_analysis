@@ -1,0 +1,25 @@
+flowchart TD
+  A[Linux journal logs] --> B[Vector source: journal_logs]
+  B --> C[VRL remap: message/level/host/timestamp]
+  C --> D[Kafka Topic: linux_raw_logs]
+
+  D --> E[Python Consumer poll]
+  E --> F[脱敏 sanitize]
+  F --> G[模板提取 Drain3 / regex fallback]
+  G --> H[按 window+host+pattern+level 聚合]
+
+  H --> I{窗口到期?}
+  I -- 否 --> E
+  I -- 是 --> J[flush_window]
+
+  J --> K{count >= min_count_threshold?}
+  K -- 否 --> L[构建 converged 记录 ai_analyzed=0]
+  K -- 是 --> M[AI分析 缓存+重试+降级]
+  M --> N{异常且置信度达阈值?}
+  N -- 是 --> O[异步 webhook 告警 + alert_history]
+  N -- 否 --> P[跳过告警]
+
+  L --> Q[写 Kafka: linux_converged_logs]
+  M --> Q
+  Q --> R[加入 CH 缓冲队列]
+  R --> S[后台 flusher 批量写 converged_logs]

@@ -1,0 +1,38 @@
+sequenceDiagram
+    autonumber
+    participant H as Linux Host(journal)
+    participant V as Vector
+    participant KR as Kafka(linux_raw_logs)
+    participant S as ai_convergence_service
+    participant AI as Ollama/OpenAI兼容接口
+    participant KC as Kafka(linux_converged_logs)
+    participant CH as ClickHouse
+    participant W as Webhook
+
+    H->>V: 产生日志
+    V->>V: remap(message/level/host/timestamp)
+    V->>KR: 写入原始日志(JSON)
+
+    loop 持续消费
+      S->>KR: poll消息
+      S->>S: sanitize脱敏
+      S->>S: Drain3/regex提取模板
+      S->>S: 按(window,host,pattern,level)聚合计数
+      S->>S: 判断是否到窗口边界(flush)
+    end
+
+    alt count < min_count_threshold
+      S->>S: 直接生成收敛记录(ai_analyzed=0)
+    else count >= min_count_threshold
+      S->>AI: 调用AI分析(缓存/重试/超时)
+      AI-->>S: 返回JSON(is_anomaly/root_cause/actions/confidence)
+      alt 异常且置信度达阈值
+        S->>W: 异步发送告警
+        S->>CH: 写alert_history
+      end
+    end
+
+    S->>KC: 写收敛结果
+    S->>S: 放入CH缓冲队列
+    S->>CH: 后台线程批量写converged_logs
+    S->>KR: 批量/定时提交offset
