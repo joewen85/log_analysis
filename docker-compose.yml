@@ -53,9 +53,10 @@ services:
     container_name: clickhouse
     image: registry.cn-guangzhou.aliyuncs.com/joe/clickhouse-server:latest-distroless
     environment:
-      CLICKHOUSE_DB: log_ai
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-log_ai}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-logai}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-logai123456}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports: ["8123:8123", "9000:9000"]
     volumes: ["ch-data:/var/lib/clickhouse"]
     networks: [log-net]

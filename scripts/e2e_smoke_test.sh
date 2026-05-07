@@ -39,6 +39,8 @@ MIN_COUNT_THRESHOLD="${MIN_COUNT_THRESHOLD:-10}"
 KAFKA_GROUP_ID="${KAFKA_GROUP_ID:-ai-convergence-smoke-$(date +%s)}"
 KAFKA_BROKERS="${KAFKA_BROKERS:-localhost:9092}"
 KAFKA_TEST_TOPIC="${KAFKA_TEST_TOPIC:-linux_raw_logs}"
+CLICKHOUSE_USER="${CLICKHOUSE_USER:-logai}"
+CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-logai123456}"
 SERVICE_LOG="${SERVICE_LOG:-/tmp/log_ai_service_smoke.log}"
 DIAG_ON_FAIL="${DIAG_ON_FAIL:-1}"
 DIAG_OUTPUT_DIR="${DIAG_OUTPUT_DIR:-${ROOT_DIR}/diagnostics}"
@@ -105,7 +107,7 @@ fi
 
 echo "==> 初始化表结构"
 FAIL_STAGE="setup_schema"
-CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8123 bash setup_ch.sh
+CLICKHOUSE_HOST=localhost CLICKHOUSE_PORT=8123 CLICKHOUSE_USER="${CLICKHOUSE_USER}" CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD}" bash setup_ch.sh
 
 echo "==> 启动收敛服务"
 FAIL_STAGE="start_service"
@@ -114,6 +116,8 @@ KAFKA_GROUP_ID="${KAFKA_GROUP_ID}" \
 KAFKA_AUTO_OFFSET_RESET=latest \
 CLICKHOUSE_HOST=localhost \
 CLICKHOUSE_PORT=8123 \
+CLICKHOUSE_USER="${CLICKHOUSE_USER}" \
+CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD}" \
 WINDOW_MINUTES="${WINDOW_MINUTES}" \
 MIN_COUNT_THRESHOLD="${MIN_COUNT_THRESHOLD}" \
 python3 ai_convergence_service.py >"${SERVICE_LOG}" 2>&1 &
@@ -158,10 +162,20 @@ sleep "${WAIT_SECONDS}"
 echo "==> 查询 ClickHouse"
 FAIL_STAGE="verify_clickhouse"
 count_result="$(
-  docker exec "$(docker compose ps -q clickhouse)" clickhouse-client \
-    --send_timeout=10 \
-    --receive_timeout=10 \
-    --query "SELECT count() FROM log_ai.converged_logs WHERE host='${TEST_HOST}' AND created_at >= now() - INTERVAL 15 MINUTE"
+  if [[ -n "${CLICKHOUSE_PASSWORD}" ]]; then
+    docker exec "$(docker compose ps -q clickhouse)" clickhouse-client \
+      --user "${CLICKHOUSE_USER}" \
+      --password "${CLICKHOUSE_PASSWORD}" \
+      --send_timeout=10 \
+      --receive_timeout=10 \
+      --query "SELECT count() FROM log_ai.converged_logs WHERE host='${TEST_HOST}' AND created_at >= now() - INTERVAL 15 MINUTE"
+  else
+    docker exec "$(docker compose ps -q clickhouse)" clickhouse-client \
+      --user "${CLICKHOUSE_USER}" \
+      --send_timeout=10 \
+      --receive_timeout=10 \
+      --query "SELECT count() FROM log_ai.converged_logs WHERE host='${TEST_HOST}' AND created_at >= now() - INTERVAL 15 MINUTE"
+  fi
 )"
 
 echo "rows=${count_result}"

@@ -9,6 +9,8 @@ SERVICE_LOG=""
 OUTPUT_DIR="${ROOT_DIR}/diagnostics"
 TEST_HOST=""
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
+CLICKHOUSE_USER="${CLICKHOUSE_USER:-logai}"
+CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-logai123456}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -94,10 +96,17 @@ fi
 clickhouse_cid="$(docker compose ps -q clickhouse 2>/dev/null || true)"
 if [[ -n "${clickhouse_cid}" ]]; then
   run_capture "clickhouse_inspect.txt" docker inspect "${clickhouse_cid}"
-  run_capture "clickhouse_ping.txt" curl -fsS "http://localhost:8123/ping"
-  run_capture "clickhouse_tables.txt" docker exec "${clickhouse_cid}" clickhouse-client --query "SHOW TABLES FROM log_ai"
-  run_capture "clickhouse_recent_converged.txt" docker exec "${clickhouse_cid}" clickhouse-client --query "SELECT window, host, event_pattern, level, count, created_at FROM log_ai.converged_logs ORDER BY created_at DESC LIMIT 50 FORMAT Pretty"
-  run_capture "clickhouse_recent_alerts.txt" docker exec "${clickhouse_cid}" clickhouse-client --query "SELECT alert_time, host, pattern, summary, webhook_status FROM log_ai.alert_history ORDER BY alert_time DESC LIMIT 50 FORMAT Pretty"
+  if [[ -n "${CLICKHOUSE_PASSWORD}" ]]; then
+    run_capture "clickhouse_ping.txt" curl -fsS --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" "http://localhost:8123/ping"
+    run_capture "clickhouse_tables.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SHOW TABLES FROM log_ai"
+    run_capture "clickhouse_recent_converged.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SELECT window, host, event_pattern, level, count, created_at FROM log_ai.converged_logs ORDER BY created_at DESC LIMIT 50 FORMAT Pretty"
+    run_capture "clickhouse_recent_alerts.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SELECT alert_time, host, pattern, summary, webhook_status FROM log_ai.alert_history ORDER BY alert_time DESC LIMIT 50 FORMAT Pretty"
+  else
+    run_capture "clickhouse_ping.txt" curl -fsS "http://localhost:8123/ping"
+    run_capture "clickhouse_tables.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --query "SHOW TABLES FROM log_ai"
+    run_capture "clickhouse_recent_converged.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --query "SELECT window, host, event_pattern, level, count, created_at FROM log_ai.converged_logs ORDER BY created_at DESC LIMIT 50 FORMAT Pretty"
+    run_capture "clickhouse_recent_alerts.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --query "SELECT alert_time, host, pattern, summary, webhook_status FROM log_ai.alert_history ORDER BY alert_time DESC LIMIT 50 FORMAT Pretty"
+  fi
 fi
 
 if [[ -n "${SERVICE_LOG}" && -f "${SERVICE_LOG}" ]]; then

@@ -47,6 +47,7 @@ python3 -m pip install -r requirements.txt
 3. bash setup_ch.sh
 4. python ai_convergence_service.py
 > Python 服务默认本机直连：Kafka `localhost:9092`、ClickHouse `localhost:8123`
+> ClickHouse 默认鉴权：`CLICKHOUSE_USER=logai`、`CLICKHOUSE_PASSWORD=logai123456`
 > AI 分析支持远程 OpenAI 兼容接口；仅在 `AI_PROVIDER=ollama` 且未显式设置 `AI_BASE_URL` 时才默认本地 `http://localhost:11434/v1`
 > Vector 容器内默认连接 Kafka：`kafka:29092`
 ## 可选环境变量
@@ -65,6 +66,7 @@ python3 -m pip install -r requirements.txt
 - KAFKA_COMMIT_BATCH（默认100）：批量提交 offset 条数
 - KAFKA_COMMIT_INTERVAL_SEC（默认5）：最迟提交间隔秒数
 - KAFKA_TEST_TOPIC（默认linux_raw_logs）：联调脚本注入测试日志 topic
+- CLICKHOUSE_USER / CLICKHOUSE_PASSWORD（默认 `logai` / `logai123456`）：ClickHouse 鉴权账号
 - AI_CACHE_MAX_SIZE（默认1000）/ AI_CACHE_TTL_SEC（默认600）：AI 结果缓存容量与TTL
 - MIDDLEWARE_HOST_ALLOWLIST（默认空）：按 host 白名单过滤（逗号分隔）
 - MIDDLEWARE_MESSAGE_DENY_REGEX（默认空）：按 message 正则黑名单过滤（`||` 分隔多个表达式）
@@ -125,5 +127,23 @@ for i in {1..50}; do echo "$(date -Iseconds) sshd[1234]: Failed password for inv
 ```
 ## 查询
 ```bash
-docker exec -it $(docker compose ps -q clickhouse) clickhouse-client --query "SELECT host, event_pattern, count, ai_result FROM log_ai.converged_logs ORDER BY count DESC LIMIT 5 FORMAT Pretty"
+docker exec -it $(docker compose ps -q clickhouse) clickhouse-client --user "${CLICKHOUSE_USER:-logai}" --password "${CLICKHOUSE_PASSWORD:-logai123456}" --query "SELECT host, event_pattern, count, ai_result FROM log_ai.converged_logs ORDER BY count DESC LIMIT 5 FORMAT Pretty"
+```
+## 故障排查（ClickHouse 可连端口但 Python 报错）
+- 现象：`telnet localhost 8123` 可通，但程序报 `Authentication failed` / `REQUIRED_PASSWORD` / `Unexpected Http Driver Exception`
+- 原因：端口连通仅表示 TCP 可达，不代表 ClickHouse HTTP 鉴权成功
+- 旧数据卷修复（推荐）：
+```bash
+docker exec -it clickhouse clickhouse-client --query "CREATE USER IF NOT EXISTS logai IDENTIFIED BY 'logai123456'; GRANT ALL ON log_ai.* TO logai;"
+```
+- 然后确保 `.env` 中：
+```bash
+CLICKHOUSE_USER=logai
+CLICKHOUSE_PASSWORD=logai123456
+```
+- 若你希望彻底重建（会清空 ClickHouse 数据）：
+```bash
+docker compose down
+docker volume rm log_analysis_local_ch-data
+docker compose up -d clickhouse
 ```

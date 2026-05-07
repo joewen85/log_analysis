@@ -2,9 +2,17 @@
 set -euo pipefail
 CH_HOST="${CLICKHOUSE_HOST:-clickhouse}"
 CH_PORT="${CLICKHOUSE_PORT:-8123}"
-CH_DB="log_ai"
-curl -fsS "http://${CH_HOST}:${CH_PORT}/" --data-binary "CREATE DATABASE IF NOT EXISTS ${CH_DB}"
-curl -fsS "http://${CH_HOST}:${CH_PORT}/" --data-binary "
+CH_DB="${CLICKHOUSE_DB:-log_ai}"
+CH_USER="${CLICKHOUSE_USER:-logai}"
+CH_PASSWORD="${CLICKHOUSE_PASSWORD:-logai123456}"
+
+curl_cmd=(curl -fsS "http://${CH_HOST}:${CH_PORT}/")
+if [[ -n "${CH_USER}" ]]; then
+  curl_cmd+=(--user "${CH_USER}:${CH_PASSWORD}")
+fi
+
+"${curl_cmd[@]}" --data-binary "CREATE DATABASE IF NOT EXISTS ${CH_DB}"
+"${curl_cmd[@]}" --data-binary "
 CREATE TABLE IF NOT EXISTS ${CH_DB}.converged_logs (
     window DateTime,
     host LowCardinality(String),
@@ -19,7 +27,7 @@ CREATE TABLE IF NOT EXISTS ${CH_DB}.converged_logs (
     created_at DateTime DEFAULT now()
 ) ENGINE = MergeTree() ORDER BY (window, host, event_pattern)
 "
-curl -fsS "http://${CH_HOST}:${CH_PORT}/" --data-binary "
+"${curl_cmd[@]}" --data-binary "
 CREATE TABLE IF NOT EXISTS ${CH_DB}.alert_history (
     alert_time DateTime DEFAULT now(),
     host LowCardinality(String),
