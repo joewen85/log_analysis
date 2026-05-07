@@ -1,5 +1,6 @@
 services:
   kafka:
+    container_name: kafka
     image: registry.cn-guangzhou.aliyuncs.com/joe/cp-kafka:7.7.8
     environment:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
@@ -28,6 +29,7 @@ services:
       timeout: 5s
       retries: 5
   ollama:
+    container_name: llm
     image: ollama/ollama:latest
     ports: ["11434:11434"]
     volumes: ["ollama-data:/root/.ollama"]
@@ -37,6 +39,7 @@ services:
         limits: { memory: 8G }
     networks: [log-net]
   vector:
+    container_name: vector
     image: registry.cn-guangzhou.aliyuncs.com/joe/vector:0.55.X-distroless-libc
     volumes:
       - ./vector.yaml:/etc/vector/vector.yaml:ro
@@ -47,6 +50,7 @@ services:
       kafka:
         condition: service_healthy
   clickhouse:
+    container_name: clickhouse
     image: registry.cn-guangzhou.aliyuncs.com/joe/clickhouse-server:latest-distroless
     environment:
       CLICKHOUSE_DB: log_ai
