@@ -58,6 +58,7 @@ python3 -m pip install -r requirements.txt
 - KAFKA_GROUP_ID（默认ai-convergence-pipeline）：消费组ID
 - KAFKA_AUTO_OFFSET_RESET（默认latest）：`latest` 或 `earliest`
 - AI_PROVIDER（默认openai_compatible）：`openai_compatible` 或 `ollama`
+- AI_ANALYSIS_ENABLED（默认true）：是否启用 AI 分析（`true/false`）
 - AI_MODEL：模型名称（由目标模型服务决定）
 - AI_BASE_URL：模型服务地址（如 `https://your-llm-gateway/v1`，官方 OpenAI 可留空）
 - AI_API_KEY：模型服务访问密钥
@@ -112,6 +113,10 @@ python ai_convergence_service.py
 本地 Ollama 示例：
 ```bash
 AI_PROVIDER=ollama AI_MODEL=llama3.1:8b python ai_convergence_service.py
+```
+关闭 AI 分析（仅做日志收敛，不调用模型）：
+```bash
+AI_ANALYSIS_ENABLED=false python ai_convergence_service.py
 ```
 失败自动诊断包（默认开启）：
 - `DIAG_ON_FAIL=1`（默认）失败时自动抓取

@@ -69,6 +69,7 @@ class AppConfig:
     ai_api_key: str
     ai_organization: str
     ai_project: str
+    ai_analysis_enabled: bool
     window_minutes: int
     min_count_threshold: int
     max_sample_size: int
@@ -117,6 +118,7 @@ class AppConfig:
             ai_api_key=ai_api_key,
             ai_organization=ai_organization,
             ai_project=ai_project,
+            ai_analysis_enabled=_env_bool("AI_ANALYSIS_ENABLED", True),
             window_minutes=_env_int("WINDOW_MINUTES", 5),
             min_count_threshold=_env_int("MIN_COUNT_THRESHOLD", 5),
             max_sample_size=_env_int("MAX_SAMPLE_SIZE", 3),

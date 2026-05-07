@@ -37,7 +37,11 @@ class LogConverger:
         self.logger = logger
         self.sanitizer = sanitizer or Sanitizer()
         self.template_extractor = template_extractor or TemplateExtractor(config, logger)
-        self.ai_analyzer = ai_analyzer or AIAnalyzer(config, logger)
+        self.ai_analyzer = ai_analyzer
+        if self.ai_analyzer is None and self.config.ai_analysis_enabled:
+            self.ai_analyzer = AIAnalyzer(config, logger)
+        if not self.config.ai_analysis_enabled:
+            self.logger.info("AI analysis is disabled by AI_ANALYSIS_ENABLED=false")
         self.storage_sink = storage_sink or ClickHouseSink(config, logger)
         self.notifier = notifier or WebhookNotifier(config.webhook_url, logger)
         self.kafka_prod = kafka_producer or Producer(
@@ -95,6 +99,11 @@ class LogConverger:
                 trend = f"{int((ratio - 1) * 100)}%" if ratio != 1 else "stable"
 
             if count < self.config.min_count_threshold:
+                results.append(self._build_converged(key, data, ai_analyzed=False))
+                next_prev_counts[(host, pattern, level)] = count
+                continue
+
+            if not self.config.ai_analysis_enabled or self.ai_analyzer is None:
                 results.append(self._build_converged(key, data, ai_analyzed=False))
                 next_prev_counts[(host, pattern, level)] = count
                 continue
