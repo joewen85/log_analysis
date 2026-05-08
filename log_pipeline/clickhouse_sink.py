@@ -11,6 +11,26 @@ from .config import AppConfig
 
 CONVERGED_COLUMNS = ["window", "host", "event_pattern", "level", "count", "first_seen", "last_seen", "samples", "ai_analyzed", "ai_result"]
 ALERT_COLUMNS = ["host", "pattern", "summary", "webhook_status"]
+BEHAVIOR_COLUMNS = [
+    "window",
+    "host",
+    "client_ip",
+    "request_count",
+    "unique_path_count",
+    "top_paths",
+    "method_counts",
+    "status_2xx",
+    "status_3xx",
+    "status_4xx",
+    "status_5xx",
+    "status_other",
+    "total_bytes",
+    "avg_bytes",
+    "first_seen",
+    "last_seen",
+    "ai_analyzed",
+    "ai_result",
+]
 CREATE_CONVERGED_SQL = """
 CREATE TABLE IF NOT EXISTS converged_logs (
     window DateTime,
@@ -34,6 +54,29 @@ CREATE TABLE IF NOT EXISTS alert_history (
     summary String,
     webhook_status UInt8
 ) ENGINE = MergeTree() ORDER BY alert_time
+"""
+CREATE_BEHAVIOR_SQL = """
+CREATE TABLE IF NOT EXISTS user_behavior_windows (
+    window DateTime,
+    host LowCardinality(String),
+    client_ip String,
+    request_count UInt32,
+    unique_path_count UInt32,
+    top_paths String,
+    method_counts String,
+    status_2xx UInt32,
+    status_3xx UInt32,
+    status_4xx UInt32,
+    status_5xx UInt32,
+    status_other UInt32,
+    total_bytes UInt64,
+    avg_bytes Float64,
+    first_seen DateTime,
+    last_seen DateTime,
+    ai_analyzed UInt8,
+    ai_result String,
+    created_at DateTime DEFAULT now()
+) ENGINE = MergeTree() ORDER BY (window, host, client_ip)
 """
 
 
@@ -62,6 +105,7 @@ class ClickHouseSink:
         self.logger = logger
         self.client = None
         self.buffer = deque()
+        self.behavior_buffer = deque()
         self.lock = threading.Lock()
         self.schema_ready = False
         self._init_client()
@@ -91,6 +135,12 @@ class ClickHouseSink:
             return
         with self.lock:
             self.buffer.extend(records)
+
+    def enqueue_behavior(self, records: List[Dict[str, Any]]):
+        if not self.available or not records:
+            return
+        with self.lock:
+            self.behavior_buffer.extend(records)
 
     def insert_alert(self, host: str, pattern: str, summary: str, status: int):
         if not self.available:
@@ -125,6 +175,7 @@ class ClickHouseSink:
         self.client.command(f"CREATE DATABASE IF NOT EXISTS {self.config.clickhouse_db}")
         self.client.command(CREATE_CONVERGED_SQL)
         self.client.command(CREATE_ALERT_SQL)
+        self.client.command(CREATE_BEHAVIOR_SQL)
         self.schema_ready = True
         self.logger.info("✅ ClickHouse 表结构检查完成")
 
@@ -132,35 +183,68 @@ class ClickHouseSink:
         def loop():
             while True:
                 time.sleep(3)
-                if not self.buffer:
+                if not self.buffer and not self.behavior_buffer:
                     continue
                 with self.lock:
                     batch = list(self.buffer)
                     self.buffer.clear()
+                    behavior_batch = list(self.behavior_buffer)
+                    self.behavior_buffer.clear()
                 try:
-                    rows = [
-                        [
-                            parse_ch_datetime(row.get("window")),
-                            row.get("host", "unknown"),
-                            row.get("event_pattern", ""),
-                            row.get("level", "INFO"),
-                            int(row.get("count", 0)),
-                            parse_ch_datetime(row.get("first_seen")),
-                            parse_ch_datetime(row.get("last_seen")),
-                            row.get("samples", "[]"),
-                            int(row.get("ai_analyzed", 0)),
-                            row.get("ai_result", "{}"),
+                    if batch:
+                        rows = [
+                            [
+                                parse_ch_datetime(row.get("window")),
+                                row.get("host", "unknown"),
+                                row.get("event_pattern", ""),
+                                row.get("level", "INFO"),
+                                int(row.get("count", 0)),
+                                parse_ch_datetime(row.get("first_seen")),
+                                parse_ch_datetime(row.get("last_seen")),
+                                row.get("samples", "[]"),
+                                int(row.get("ai_analyzed", 0)),
+                                row.get("ai_result", "{}"),
+                            ]
+                            for row in batch
                         ]
-                        for row in batch
-                    ]
-                    self.client.insert("converged_logs", rows, column_names=CONVERGED_COLUMNS)
-                    self.logger.info(f"📊 写入 ClickHouse {len(batch)} 条")
+                        self.client.insert("converged_logs", rows, column_names=CONVERGED_COLUMNS)
+                        self.logger.info(f"📊 写入 ClickHouse converged_logs {len(batch)} 条")
+
+                    if behavior_batch:
+                        behavior_rows = [
+                            [
+                                parse_ch_datetime(row.get("window")),
+                                row.get("host", "unknown"),
+                                row.get("client_ip", ""),
+                                int(row.get("request_count", 0)),
+                                int(row.get("unique_path_count", 0)),
+                                row.get("top_paths", "[]"),
+                                row.get("method_counts", "{}"),
+                                int(row.get("status_2xx", 0)),
+                                int(row.get("status_3xx", 0)),
+                                int(row.get("status_4xx", 0)),
+                                int(row.get("status_5xx", 0)),
+                                int(row.get("status_other", 0)),
+                                int(row.get("total_bytes", 0)),
+                                float(row.get("avg_bytes", 0.0)),
+                                parse_ch_datetime(row.get("first_seen")),
+                                parse_ch_datetime(row.get("last_seen")),
+                                int(row.get("ai_analyzed", 0)),
+                                row.get("ai_result", "{}"),
+                            ]
+                            for row in behavior_batch
+                        ]
+                        self.client.insert("user_behavior_windows", behavior_rows, column_names=BEHAVIOR_COLUMNS)
+                        self.logger.info(f"📊 写入 ClickHouse user_behavior_windows {len(behavior_batch)} 条")
                 except Exception as error:
                     if "UNKNOWN_TABLE" in str(error):
                         try:
                             self._ensure_schema(force=True)
-                            self.client.insert("converged_logs", rows, column_names=CONVERGED_COLUMNS)
-                            self.logger.info(f"📊 写入 ClickHouse {len(batch)} 条 (schema recovered)")
+                            if batch:
+                                self.client.insert("converged_logs", rows, column_names=CONVERGED_COLUMNS)
+                            if behavior_batch:
+                                self.client.insert("user_behavior_windows", behavior_rows, column_names=BEHAVIOR_COLUMNS)
+                            self.logger.info("📊 写入 ClickHouse完成 (schema recovered)")
                             continue
                         except Exception as retry_error:
                             self.logger.error(f"❌ CH 重试写入失败: {retry_error}")

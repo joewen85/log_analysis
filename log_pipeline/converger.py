@@ -12,6 +12,7 @@ from .ai_analyzer import AIAnalyzer
 from .clickhouse_sink import ClickHouseSink
 from .config import AppConfig
 from .interfaces import AIAnalyzerProtocol, NotifierProtocol, StorageSinkProtocol, TemplateExtractorProtocol
+from .nginx_behavior import NginxBehaviorAggregator
 from .notifier import WebhookNotifier
 from .sanitizer import Sanitizer
 from .template_extractor import TemplateExtractor
@@ -35,7 +36,14 @@ class LogConverger:
     ):
         self.config = config
         self.logger = logger
-        self.sanitizer = sanitizer or Sanitizer()
+        self.sanitizer = sanitizer or Sanitizer(
+            enabled=self.config.sanitize_enabled,
+            mask_ip=self.config.sanitize_mask_ip,
+            mask_credentials=self.config.sanitize_mask_credentials,
+            extra_rules=self.config.sanitize_extra_rules,
+        )
+        if not self.config.sanitize_enabled:
+            self.logger.info("Sanitizer is disabled by SANITIZE_ENABLED=false")
         self.template_extractor = template_extractor or TemplateExtractor(config, logger)
         self.ai_analyzer = ai_analyzer
         if self.ai_analyzer is None and self.config.ai_analysis_enabled:
@@ -47,6 +55,7 @@ class LogConverger:
         self.kafka_prod = kafka_producer or Producer(
             {"bootstrap.servers": config.kafka_brokers, "enable.idempotence": True}
         )
+        self.behavior_aggregator = NginxBehaviorAggregator(top_paths=self.config.behavior_top_paths)
         self.buffer = defaultdict(self._new_buffer_entry)
         self.prev_window_counts: Dict[Tuple[str, str, str], int] = {}
         self.window_start = self._align_window(datetime.utcnow())
@@ -66,6 +75,7 @@ class LogConverger:
             sanitized = self.sanitizer.sanitize(raw)
             pattern = self.template_extractor.extract(sanitized)
             window = self._align_window(datetime.utcnow())
+            self.behavior_aggregator.process_message(msg, window)
             key = (window, host, pattern, level)
             entry = self.buffer[key]
             entry["count"] += 1
@@ -124,6 +134,10 @@ class LogConverger:
             self._push_to_kafka(results)
             if self.storage_sink.available:
                 self.storage_sink.enqueue_converged(results)
+        behavior_results = self.behavior_aggregator.flush_window(self.window_start)
+        behavior_results = self._analyze_behavior_batch(behavior_results)
+        if behavior_results and self.storage_sink.available and hasattr(self.storage_sink, "enqueue_behavior"):
+            self.storage_sink.enqueue_behavior(behavior_results)  # type: ignore[attr-defined]
 
         retained_buffer = defaultdict(self._new_buffer_entry)
         for key, data in self.buffer.items():
@@ -162,6 +176,33 @@ class LogConverger:
                 self.kafka_prod.poll(0.5)
                 self.kafka_prod.produce(self.config.converged_topic, value=payload)
         self.kafka_prod.flush(timeout=10)
+
+    def _analyze_behavior_batch(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not records:
+            return records
+        analyzed: List[Dict[str, Any]] = []
+        for record in records:
+            request_count = int(record.get("request_count", 0))
+            if (
+                not self.config.behavior_ai_enabled
+                or not self.config.ai_analysis_enabled
+                or self.ai_analyzer is None
+                or request_count < self.config.behavior_min_requests
+            ):
+                record["ai_analyzed"] = 0
+                record["ai_result"] = "{}"
+                analyzed.append(record)
+                continue
+            try:
+                behavior_ai_result = self.ai_analyzer.analyze_user_behavior(record)  # type: ignore[attr-defined]
+                record["ai_analyzed"] = 1
+                record["ai_result"] = json.dumps(behavior_ai_result, ensure_ascii=False)
+            except Exception as error:
+                self.logger.warning(f"⚠️ 行为AI分析失败，降级保存原始统计: {error}")
+                record["ai_analyzed"] = 0
+                record["ai_result"] = "{}"
+            analyzed.append(record)
+        return analyzed
 
     def _handle_alert(self, host: str, pattern: str, ai_result: Dict[str, Any]):
         status = self.notifier.send(host, pattern, ai_result)

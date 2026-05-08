@@ -17,6 +17,7 @@ Linux Host → Vector → Kafka → Python(收敛+Drain3+AI) → Kafka → Click
 - `log_pipeline/converger.py`：收敛主流程编排
 - `log_pipeline/ai_analyzer.py`：AI 分析（缓存/重试/降级）
 - `log_pipeline/template_extractor.py`：模板提取（Drain3/正则回退）
+- `log_pipeline/nginx_behavior.py`：Nginx访问日志按IP行为聚合（时间窗口统计）
 - `log_pipeline/clickhouse_sink.py`：ClickHouse 缓冲与批量写入
 - `log_pipeline/notifier.py`：Webhook 告警发送
 - `log_pipeline/commit_manager.py`：offset 批量/定时提交策略
@@ -64,6 +65,13 @@ python3 -m pip install -r requirements.txt
 - AI_API_KEY：模型服务访问密钥
 - AI_ORGANIZATION / AI_PROJECT（默认空）：可选组织/项目标识
 - AI_RETRY_TIMES（默认2）/ AI_TIMEOUT_SEC（默认15）：AI 调用重试与超时
+- BEHAVIOR_AI_ENABLED（默认true）：是否启用 Nginx IP行为聚合的 AI 解释
+- BEHAVIOR_MIN_REQUESTS（默认20）：单窗口内单IP最小请求数，低于阈值仅统计不做AI
+- BEHAVIOR_TOP_PATHS（默认5）：保存/分析的Top路径数量
+- SANITIZE_ENABLED（默认true）：是否启用日志脱敏
+- SANITIZE_MASK_IP（默认true）：是否脱敏IP地址
+- SANITIZE_MASK_CREDENTIALS（默认true）：是否脱敏密码/token/key
+- SANITIZE_EXTRA_RULES（默认空）：自定义脱敏规则（`pattern=>replacement`，多条用 `||` 分隔）
 - KAFKA_COMMIT_BATCH（默认100）：批量提交 offset 条数
 - KAFKA_COMMIT_INTERVAL_SEC（默认5）：最迟提交间隔秒数
 - KAFKA_TEST_TOPIC（默认linux_raw_logs）：联调脚本注入测试日志 topic
@@ -118,6 +126,22 @@ AI_PROVIDER=ollama AI_MODEL=llama3.1:8b python ai_convergence_service.py
 ```bash
 AI_ANALYSIS_ENABLED=false python ai_convergence_service.py
 ```
+关闭 Nginx 行为 AI（保留行为统计入库）：
+```bash
+BEHAVIOR_AI_ENABLED=false python ai_convergence_service.py
+```
+关闭全部脱敏（原文入库，谨慎）：
+```bash
+SANITIZE_ENABLED=false python ai_convergence_service.py
+```
+仅关闭IP脱敏（保留凭据脱敏）：
+```bash
+SANITIZE_MASK_IP=false SANITIZE_MASK_CREDENTIALS=true python ai_convergence_service.py
+```
+自定义脱敏规则示例：
+```bash
+SANITIZE_EXTRA_RULES='sessionid=[^\\s;]+=>sessionid=[MASKED]||[A-Fa-f0-9]{32}=>[HEX32]' python ai_convergence_service.py
+```
 失败自动诊断包（默认开启）：
 - `DIAG_ON_FAIL=1`（默认）失败时自动抓取
 - `DIAG_OUTPUT_DIR=./diagnostics` 诊断包输出目录
@@ -133,6 +157,9 @@ for i in {1..50}; do echo "$(date -Iseconds) sshd[1234]: Failed password for inv
 ## 查询
 ```bash
 docker exec -it $(docker compose ps -q clickhouse) clickhouse-client --user "${CLICKHOUSE_USER:-logai}" --password "${CLICKHOUSE_PASSWORD:-logai123456}" --query "SELECT host, event_pattern, count, ai_result FROM log_ai.converged_logs ORDER BY count DESC LIMIT 5 FORMAT Pretty"
+```
+```bash
+docker exec -it $(docker compose ps -q clickhouse) clickhouse-client --user "${CLICKHOUSE_USER:-logai}" --password "${CLICKHOUSE_PASSWORD:-logai123456}" --query "SELECT window, host, client_ip, request_count, unique_path_count, status_4xx, status_5xx, ai_analyzed, ai_result FROM log_ai.user_behavior_windows ORDER BY window DESC LIMIT 20 FORMAT Pretty"
 ```
 ## 故障排查（ClickHouse 可连端口但 Python 报错）
 - 现象：`telnet localhost 8123` 可通，但程序报 `Authentication failed` / `REQUIRED_PASSWORD` / `Unexpected Http Driver Exception`

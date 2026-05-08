@@ -100,11 +100,13 @@ if [[ -n "${clickhouse_cid}" ]]; then
     run_capture "clickhouse_ping.txt" curl -fsS --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" "http://localhost:8123/ping"
     run_capture "clickhouse_tables.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SHOW TABLES FROM log_ai"
     run_capture "clickhouse_recent_converged.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SELECT window, host, event_pattern, level, count, created_at FROM log_ai.converged_logs ORDER BY created_at DESC LIMIT 50 FORMAT Pretty"
+    run_capture "clickhouse_recent_behavior.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SELECT window, host, client_ip, request_count, unique_path_count, status_4xx, status_5xx, ai_analyzed, created_at FROM log_ai.user_behavior_windows ORDER BY created_at DESC LIMIT 50 FORMAT Pretty"
     run_capture "clickhouse_recent_alerts.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SELECT alert_time, host, pattern, summary, webhook_status FROM log_ai.alert_history ORDER BY alert_time DESC LIMIT 50 FORMAT Pretty"
   else
     run_capture "clickhouse_ping.txt" curl -fsS "http://localhost:8123/ping"
     run_capture "clickhouse_tables.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --query "SHOW TABLES FROM log_ai"
     run_capture "clickhouse_recent_converged.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --query "SELECT window, host, event_pattern, level, count, created_at FROM log_ai.converged_logs ORDER BY created_at DESC LIMIT 50 FORMAT Pretty"
+    run_capture "clickhouse_recent_behavior.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --query "SELECT window, host, client_ip, request_count, unique_path_count, status_4xx, status_5xx, ai_analyzed, created_at FROM log_ai.user_behavior_windows ORDER BY created_at DESC LIMIT 50 FORMAT Pretty"
     run_capture "clickhouse_recent_alerts.txt" docker exec "${clickhouse_cid}" clickhouse-client --user "${CLICKHOUSE_USER}" --query "SELECT alert_time, host, pattern, summary, webhook_status FROM log_ai.alert_history ORDER BY alert_time DESC LIMIT 50 FORMAT Pretty"
   fi
 fi

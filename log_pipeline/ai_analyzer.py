@@ -98,3 +98,60 @@ class AIAnalyzer:
             "actions": ["检查负载", "核对变更"],
             "confidence": 0.7,
         }
+
+    def analyze_user_behavior(self, behavior: Dict[str, Any]) -> Dict[str, Any]:
+        cache_key = f"behavior|{behavior.get('window')}|{behavior.get('host')}|{behavior.get('client_ip')}"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        prompt = f"""你是一个资深安全与流量分析专家。请根据Nginx窗口聚合行为分析是否异常，并输出严格JSON。
+数据:
+  window: {behavior.get("window")}
+  host: {behavior.get("host")}
+  client_ip: {behavior.get("client_ip")}
+  request_count: {behavior.get("request_count")}
+  unique_path_count: {behavior.get("unique_path_count")}
+  top_paths: {behavior.get("top_paths")}
+  method_counts: {behavior.get("method_counts")}
+  status_2xx: {behavior.get("status_2xx")}
+  status_3xx: {behavior.get("status_3xx")}
+  status_4xx: {behavior.get("status_4xx")}
+  status_5xx: {behavior.get("status_5xx")}
+  status_other: {behavior.get("status_other")}
+  total_bytes: {behavior.get("total_bytes")}
+  avg_bytes: {behavior.get("avg_bytes")}
+要求:
+1. is_suspicious: boolean
+2. behavior_type: string (如 normal/crawler/scanner/bruteforce/ddos/suspicious)
+3. summary: string
+4. actions: list
+5. confidence: float(0~1)
+仅返回JSON。"""
+
+        for retry in range(self.config.ai_retry_times):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.config.ai_model,
+                    messages=[
+                        {"role": "system", "content": "Output valid JSON only."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    timeout=self.config.ai_timeout_sec,
+                )
+                result = json.loads(response.choices[0].message.content)
+                self._set_cached(cache_key, result)
+                return result
+            except Exception as error:
+                self.logger.warning(f"⚠️ 行为AI调用失败 (重试 {retry + 1}): {error}")
+                time.sleep(2)
+
+        self.logger.info(f"🛡️ 行为AI降级兜底: {cache_key}")
+        return {
+            "is_suspicious": False,
+            "behavior_type": "unknown",
+            "summary": "AI behavior analysis unavailable",
+            "actions": ["检查上游日志采样", "确认流量趋势"],
+            "confidence": 0.4,
+        }

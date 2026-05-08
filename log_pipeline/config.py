@@ -70,6 +70,10 @@ class AppConfig:
     ai_organization: str
     ai_project: str
     ai_analysis_enabled: bool
+    sanitize_enabled: bool
+    sanitize_mask_ip: bool
+    sanitize_mask_credentials: bool
+    sanitize_extra_rules: str
     window_minutes: int
     min_count_threshold: int
     max_sample_size: int
@@ -86,6 +90,9 @@ class AppConfig:
     drain3_stub_count: int
     ai_cache_max_size: int
     ai_cache_ttl_sec: int
+    behavior_ai_enabled: bool
+    behavior_min_requests: int
+    behavior_top_paths: int
     kafka_commit_batch: int
     kafka_commit_interval_sec: int
     middleware_host_allowlist: str
@@ -119,6 +126,10 @@ class AppConfig:
             ai_organization=ai_organization,
             ai_project=ai_project,
             ai_analysis_enabled=_env_bool("AI_ANALYSIS_ENABLED", True),
+            sanitize_enabled=_env_bool("SANITIZE_ENABLED", True),
+            sanitize_mask_ip=_env_bool("SANITIZE_MASK_IP", True),
+            sanitize_mask_credentials=_env_bool("SANITIZE_MASK_CREDENTIALS", True),
+            sanitize_extra_rules=os.getenv("SANITIZE_EXTRA_RULES", ""),
             window_minutes=_env_int("WINDOW_MINUTES", 5),
             min_count_threshold=_env_int("MIN_COUNT_THRESHOLD", 5),
             max_sample_size=_env_int("MAX_SAMPLE_SIZE", 3),
@@ -135,6 +146,9 @@ class AppConfig:
             drain3_stub_count=_env_int("DRAIN3_STUB_COUNT", 20),
             ai_cache_max_size=_env_int("AI_CACHE_MAX_SIZE", 1000),
             ai_cache_ttl_sec=_env_int("AI_CACHE_TTL_SEC", 600),
+            behavior_ai_enabled=_env_bool("BEHAVIOR_AI_ENABLED", True),
+            behavior_min_requests=_env_int("BEHAVIOR_MIN_REQUESTS", 20),
+            behavior_top_paths=_env_int("BEHAVIOR_TOP_PATHS", 5),
             kafka_commit_batch=_env_int("KAFKA_COMMIT_BATCH", 100),
             kafka_commit_interval_sec=_env_int("KAFKA_COMMIT_INTERVAL_SEC", 5),
             middleware_host_allowlist=os.getenv("MIDDLEWARE_HOST_ALLOWLIST", ""),
